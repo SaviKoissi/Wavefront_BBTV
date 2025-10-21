@@ -1,0 +1,2318 @@
+---
+title: "BBTV-Data_Exploration"
+author: "Koissi Savi"
+date: "2025-09-18"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load libraries 
+
+```{r, echo=FALSE, warning=FALSE}
+
+library(tidyverse)
+library(readxl)
+library(stringdist)
+library(stringr)
+library(forcats)
+
+#library(ggplot2)
+library(skimr)       # for clean summary statistics
+library(DataExplorer) # for quick EDA plots
+library(sf)          # for mapping
+library(leaflet)     # interactive map
+
+library(janitor)
+
+library(rnaturalearth)
+library(rnaturalearthdata)
+
+library(tidymodels)
+library(vip)
+library(xgboost)
+library(gstat)
+
+library(viridis)
+
+library(brms)
+library(posterior)
+
+
+library(ggspatial)
+library(terra)
+library(ggrepel)
+```
+
+# Load data 
+
+```{r, echo=FALSE, warning=FALSE}
+# Extraction of metadata of BBTD sample collection
+
+# Load data
+
+data_cplt <-read_xlsx("/Users/koissi/Desktop/WAVE_project/Rapid_wave/BBTD/BBTD_transformed_06_2025_v2_complet.xlsx", sheet = "Plant_Dim")
+
+meta<- read_xlsx("/Users/koissi/Desktop/WAVE_project/Rapid_wave/BBTD/BBTD_transformed_06_2025_v2_complet.xlsx", sheet = "Field_Dim")
+
+cplt <- data_cplt %>%
+  left_join(meta, by = "Unique_Field_ID")
+
+
+```
+
+# Data  cleaning
+
+```{r, echo=FALSE, warning=FALSE}
+
+data <- cplt %>%
+  mutate(
+    `Total Sucker Number` = as.numeric(`Total Sucker Number`),  # make sure it's numeric
+    `Total Sucker Number` = if_else(
+      is.na(`Total Sucker Number`),
+      as.numeric(str_extract(Calculation, "(?<=-)[0-9]+(?=-[AS])")),
+      `Total Sucker Number`
+    )
+  )%>%
+  
+  # Now rename as before
+  rename(
+    PlantNumber = `Plant Number`,
+    TotalNsucker = "Total Sucker Number",
+    SurveyedS = `Surveyed Sucker`,
+    Disease_state = "Disease State",
+    Severity = `Severity Score`,
+    Aphid0wEL = `Aphid Count - Wingless (Emerging Leaf Sheath)`, 
+    AphidEL   = `Aphid Count - Winged (Emerging Leaf Sheath)`,
+    AphidB    = `Aphid Count - Winged (Base)`,
+    Aphid0wB  = `Aphid Count - Wingless (Base)`, 
+    AphidN    = `Aphid Count - Winged (Neck)`, 
+    Aphid0wN  = `Aphid Count - Wingless (Neck)`,
+    Location  = `Location name`, 
+    AgroEco   = `Agro-ecology zone`, 
+    Fieldsize = `Field size (m2)`,
+    PlantationAge = `Musa field Age (Months)`,
+    Distance  = `Distance traveled since the last field surveyed (km)`,
+    NumberCountedField = `Number of Musa fields counted in the survey, after the last survey conducted`,
+    Intercrops = `Intercrops within the field`,
+    CropsSurrounding = `Crops around the field`,
+    Management = `Managed or Unmanaged`,
+    TypeFarming = `Production type`, 
+    Latitude  = `_Automatic GPS Coordinates_latitude`,
+    Longitude = `_Automatic GPS Coordinates_longitude`, 
+    Altitude  = `_Automatic GPS Coordinates_altitude`, 
+    CoordPrecision = `_Automatic GPS Coordinates_precision`
+  ) %>%
+  
+  # Drop unwanted variables (including Calculation)
+  dplyr::select(-c(
+    "Calculation", "Picture", "start", "end", "Country", "YEAR OF COLLECTION", 
+    "Field ID", "Surveyor Name", "Data Collector's Initials", "Enter a date and time", 
+    "Country.1", "Manual coordinates/Latitude/Latitude hemisphere", 
+    "Manual coordinates/Latitude/Degrees - latitude", 
+    "Manual coordinates/Longitude/Longitude hemisphere", 
+    "Manual coordinates/Longitude/Degrees - longitude", 
+    "Manual coordinates/Longitude/Altitude(m)", 
+    `Sample Collected`, `Unique Plant ID`,`Automatic GPS Coordinates`
+  )) %>% 
+  mutate( TotalAphid = Aphid0wEL + AphidEL + 
+            AphidB + Aphid0wB + AphidN + Aphid0wN
+    )
+
+```
+
+## Note: 
+There are several qualitive variable that are transformed into a seemingly quantitative such as
+* Severity                             
+                              
+ 1 = no symptoms                      
+ 6 = bunchy top appearance            
+ 4 = chlorosis of leaf margin         
+ 2 = dark green streaks on leaf lamina
+ 5 = reduction in leaf size           
+ 3 = dark green streaks on the petiole
+
+* Disease_state   
+         
+Asymptomatic  = 0  
+Symptomatic  = 1    
+
+```{r, echo=FALSE, warning=FALSE}
+data_clean <- data %>%
+  mutate(
+    # Step 1: Clean categorical scores (extract only digits)
+    across(c(Severity, CMV, BSV, BXW, Sigatoka, `Fusarium Wilt`, Management, Weediness),
+           ~ str_extract(.x, "\\d+")),
+
+    # Step 2: Recoding variables for consistency
+    Symptoms = fct_recode(Symptoms,
+      "No Symptoms" = " No symptoms",
+      "No Symptoms" = "No symptoms Bunching",
+      "No Symptoms" = "No symptoms Bunching Dot-dash symptoms on leaves Dot-dash symptoms on petioles or pseudostem",
+      "No Symptoms" = "No symptoms Dot-dash symptoms on petioles or pseudostem"
+    ),
+
+    Disease_state = fct_recode(Disease_state,
+      "0" = "Asymptomatic",
+      "0" = "Asymptomatic = A",
+      "1" = "Sympomatic",
+      "1" = "Symptomatic",
+      "1" = "Symptomatic = S"
+    ),
+
+    Intercrops = fct_recode(Intercrops,
+      "1" = "Yes",
+      "1" = "Manioc",
+      "0" = "No",
+      "0" = "Non"
+    ), 
+    Variety =fct_recode(Variety, 
+                        "Banana plantain" = "banana plantain", 
+                        "Sweet Banana" = "sweet banana"
+      
+    )
+  ) %>%
+  # Step 3: Convert cleaned numeric strings into numeric
+  mutate(across(c(Severity, CMV, BSV, BXW, Sigatoka, `Fusarium Wilt`,
+                  Management, Weediness), as.numeric)) %>%
+
+  # Step 4: Harmonize crop names
+  mutate(CropsSurrounding = str_replace_all(CropsSurrounding,
+                                            c("Manihot esculenta" = "Manioc",
+                                              "Maïs" = "Maize",
+                                              "Mais" = "Maize", 
+                                              "papayer" = "Papayer", 
+                                              "palmier" = "Palmier "))) %>%
+
+  # Step 5: Split multi-crop entries into separate rows
+  mutate(CropsSurrounding = str_split(CropsSurrounding, pattern = ",\\s*|\\set\\s*")) %>%
+  unnest(CropsSurrounding) %>%
+  mutate(CropsSurrounding = str_trim(CropsSurrounding)) %>%
+
+  # Step 6: One-hot encode crops with CS_ prefix
+  mutate(value = 1) %>%
+  pivot_wider(
+    names_from = CropsSurrounding,
+    values_from = value,
+    values_fill = list(value = 0),
+    names_prefix = "CS_"
+  ) %>%
+
+  # Step 7: Drop irrelevant dummy variables (noise categories)
+  dplyr::select(-matches("CS_(NA|Non|N|No)$"))
+
+data_clean <- data_clean %>%
+  mutate(
+    TypeFarming= if_else(
+      Other == "Plantation/commercial Farm (intercrop)", 
+      "Plantation/commercial Farm (intercrop)", 
+      TypeFarming
+    ),
+    Other = if_else(
+      Other == "Plantation/commercial Farm (intercrop)", 
+      NA_character_, 
+      Other
+    )
+  ) %>% 
+  dplyr::select(-c(Other, Aphid0wEL, AphidEL, 
+             AphidB, Aphid0wB, AphidN, Aphid0wN))
+
+#data_clean %>% glimpse()
+```
+
+# Sanitation of the disease status
+
+```{r, echo=FALSE, warning=FALSE}
+
+data_clean <- data_clean %>%
+  mutate(
+    # safe numeric conversion (handles factors and characters)
+    Disease_state = as.numeric(as.character(Disease_state)),
+    Severity      = as.numeric(as.character(Severity)),
+
+    # normalize symptoms text for reliable comparison
+    Symptoms_clean = str_to_lower(str_trim(as.character(Symptoms))),
+
+    # define evidence of disease: symptom not "no symptoms" OR severity not 1 (but only if severity is present)
+    evidence_disease = ( !is.na(Symptoms_clean) & Symptoms_clean != "no symptoms" ) |
+                       ( !is.na(Severity) & Severity != 1 ),
+
+    # final decision rule
+    Disease_state = case_when(
+      Disease_state == 1 ~ 1,                                         # keep confirmed 1s
+      (is.na(Disease_state) | Disease_state == 0) & evidence_disease ~ 1,  # upgrade to 1 when there is evidence
+      TRUE ~ 0                                                         # otherwise mark 0
+    )
+  ) %>%
+  dplyr::select(-Symptoms_clean, -evidence_disease)   # clean helper cols
+
+# Symptoms
+data_clean <- data_clean %>%
+  mutate(
+    # If Symptoms missing but Disease_state is 0, impute "No symptoms"
+    Symptoms = if_else(
+      is.na(Symptoms) & Disease_state == 0,
+      "No symptoms",
+      Symptoms
+    ))
+
+data_clean <- data_clean %>% 
+  mutate(
+    Severity = if_else(
+      is.na(Severity) & Disease_state == 0,
+      1,
+      Severity
+    )
+  )
+
+data_clean <- data_clean %>%
+  mutate(
+    SurveyedS = if_else(
+      is.na(SurveyedS) & !is.na(TotalNsucker),
+      TotalNsucker,
+      SurveyedS
+    )
+  )
+
+data_clean <- data_clean %>% 
+  mutate(
+    Disease_state = as.factor(Disease_state), 
+    Severity = as.factor(Severity),
+    Intercrops = as.factor(Intercrops),
+    Management = as.factor( Management),
+    Weediness = as.factor(Weediness),
+    AgroEco = as.factor(AgroEco), 
+    CS_Papayer = as.factor(CS_Papayer),
+    CS_Palmier = as.factor(CS_Palmier),
+    CS_manguier = as.factor(CS_manguier),
+    CS_Amarante = as.factor(CS_Amarante),
+    CS_Eucalyptus = as.factor(CS_Eucalyptus),
+    CS_cocotiers = as.factor(CS_cocotiers),
+    CS_Citronnelle = as.factor( CS_Citronnelle),
+    CS_Ananas = as.factor(CS_Ananas),
+    CS_Manioc = as.factor(CS_Manioc),
+    CS_Vernonia = as.factor(CS_Vernonia),
+    CS_basilicum = as.factor(CS_basilicum),
+    CS_Maize = as.factor(CS_Maize),
+    `CS_Canne à sucre` = as.factor(`CS_Canne à sucre`),
+    CS_Basilic = as.factor(CS_Basilic),
+    CS_vernonia = as.factor(CS_vernonia),
+    `CS_grande morelle` = as.factor(`CS_grande morelle`),
+    CS_Assissrè = as.factor(CS_Assissrè),
+    CS_Igname = as.factor(CS_Igname),
+    CS_Gombo = as.factor(CS_Gombo),
+    CS_arachide = as.factor(CS_arachide),
+    CS_haricot = as.factor(CS_haricot),
+    CMV = as.factor(CMV),
+    BSV = as.factor(BSV),
+    BXW = as.factor(BXW),
+    Sigatoka = as.factor(Sigatoka),
+    `Fusarium Wilt` = as.factor(`Fusarium Wilt`)
+    )
+  
+#data_clean %>% glimpse()
+
+```
+
+
+
+# Summary statistic 
+
+```{r, echo=FALSE, warning=FALSE}
+
+# 1. Summary statistics ----
+# Separate numeric and categorical summaries
+numeric_summary <- data_clean %>%
+  dplyr::select(where(is.numeric)) %>%
+  skim()
+
+categorical_summary <- data_clean %>%
+  dplyr::select(where(~is.character(.) | is.factor(.))) %>%
+  skim()
+
+# Display summaries
+print(numeric_summary)
+print(categorical_summary)
+
+# If you want a cleaner export table
+
+tab_num <- data_clean %>%
+  dplyr::select(where(is.numeric)) %>%
+  summary() %>%
+  as.data.frame()
+
+tab_cat <- data_clean %>%
+  dplyr::select(where(~is.character(.) | is.factor(.))) %>%
+  map_df(~ data.frame(var = deparse(substitute(.x)), 
+                      levels = unique(.x), 
+                      n = length(.x)))
+# # 2. Quick graphs ----
+# 
+# 
+# 
+# # Frequency table as data.frame
+# severity_df <- data_clean %>%
+#   count(Severity)
+# 
+# # Bar plot
+# ggplot(severity_df, aes(x = factor(Severity), y = n)) +
+#   geom_col(fill = "steelblue") +
+#   geom_text(aes(label = n), vjust = -0.5, size = 4) +
+#   labs(
+#     title = "Distribution of Severity Scores",
+#     x = "Severity Score",
+#     y = "Count"
+#   ) +
+#   theme_minimal()
+# 
+# 
+# # Example: Disease state distribution
+# ggplot(data_clean, aes(x = factor(Disease_state), 
+#                        fill = factor(Disease_state))) +
+#   geom_bar() +
+#   theme_minimal() +
+#   labs(title = "Distribution of Disease States")
+
+# 3. Quick map ----
+
+
+# 1. Convert your data into sf object
+data_sf <- data_clean %>%
+  filter(!is.na(Longitude), !is.na(Latitude)) %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326, remove = FALSE)
+
+# 2. Get basemap for Benin (adjust country if needed)
+benin <- ne_countries(scale = "medium", country = "Benin", returnclass = "sf")
+
+# 3. Plot Disease_state on the map
+
+ggplot() +
+  # Country outline
+  geom_sf(data = benin, fill = NA, color = "black", size = 0.6) +
+  
+  # Disease state points
+  geom_sf(
+    data = data_sf,
+    aes(color = Disease_state),
+    size = 2.5, alpha = 0.8
+  ) +
+  
+  # Color scheme (color-blind safe, contrasting)
+  scale_color_manual(
+    values = c("0" = "#1b9e77", "1" = "#d95f02"),
+    name = "Disease State",
+    labels = c("0" = "Healthy", "1" = "Diseased")
+  ) +
+  
+  # Add scale bar + north arrow
+  annotation_scale(location = "bl", width_hint = 0.3, 
+                   text_cex = 1.1, line_width = 0.8) +
+  annotation_north_arrow(location = "tl", which_north = "true",
+                         style = north_arrow_fancy_orienteering,
+                         height = unit(1.2, "cm"), width = unit(1.2, "cm")) +
+  
+  # Coordinate system
+  coord_sf() +
+  
+  # Clean theme
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major = element_line(color = "gray85", size = 0.2),
+    legend.position = "right",
+    legend.title = element_text(size = 14, face = "bold"),
+    legend.text = element_text(size = 12),
+    axis.text = element_text(size = 11),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+  
+  # Labels
+  labs(
+    title = "Spatial Distribution of Banana Bunchy Top Disease (BBTD)",
+    subtitle = "Field survey, Benin (2025)",
+    x = "Longitude", y = "Latitude"
+  )
+
+
+# Alternative 
+
+
+
+# ---------------------------
+# 1. Load admin level 2 shapefile
+# ---------------------------
+benin_lvl2 <- st_read("/Users/koissi/Downloads/ben/ben_admbnda_adm2_1m_salb_20190816.shp")
+
+# ---------------------------
+# 2. Collapse disease info at the field level
+# ---------------------------
+farm_status <- data_clean %>%
+  filter(!is.na(Longitude), !is.na(Latitude)) %>%
+  group_by(Unique_Field_ID, Longitude, Latitude) %>%
+  summarise(
+    Diseased_any = ifelse(any(Disease_state == 1, na.rm = TRUE), 1, 0),
+    .groups = "drop"
+  )
+
+# ---------------------------
+# 3. Convert to sf points
+# ---------------------------
+data_sf <- st_as_sf(farm_status, coords = c("Longitude", "Latitude"),
+                    crs = 4326, remove = FALSE)
+
+# ---------------------------
+# 4. Plot
+# ---------------------------
+ggplot() +
+  # Admin boundaries
+  geom_sf(data = benin_lvl2, fill = NA, color = "gray40", size = 0.5) +
+  
+  # Farm points
+  geom_sf(
+    data = data_sf,
+    aes(color = factor(Diseased_any)),
+    size = 2, alpha = 0.85
+  ) +
+  
+  # Clear legend
+  scale_color_manual(
+    values = c("0" = "#1b9e77", "1" = "#d95f02"),
+    name = "Field Status",
+    labels = c("0" = "All Healthy", "1" = "At least 1 Diseased Plant")
+  ) +
+  
+  # Add scale bar and north arrow
+  annotation_scale(location = "bl", width_hint = 0.25,
+                   text_cex = 1.1, line_width = 0.8) +
+  annotation_north_arrow(location = "tl", which_north = "true",
+                         style = north_arrow_fancy_orienteering,
+                         height = unit(1.2, "cm"), width = unit(1.2, "cm")) +
+  
+  coord_sf() +
+  
+  # Clean theme
+  theme_minimal(base_size = 15) +
+  theme(
+    panel.grid.major = element_line(color = "gray85", size = 0.2),
+    legend.position = "right",
+    legend.title = element_text(size = 15, face = "bold"),
+    legend.text = element_text(size = 13),
+    axis.text = element_text(size = 11),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA)
+  ) +
+  
+  # Labels
+  labs(
+    #title = "Field-Level Distribution of Banana Bunchy Top Disease (BBTD)",
+    #subtitle = "Benin, 2025 — Admin Level 2 Boundaries",
+    x = "Longitude", y = "Latitude"
+  )
+
+
+
+
+```
+
+## Summary statistics
+
+```{r,echo=FALSE, warning=FALSE}
+
+
+
+# ---------------------------
+# 2. Farms as sf points
+# ---------------------------
+farm_status <- data_clean %>%
+  filter(!is.na(Longitude), !is.na(Latitude)) %>%
+  group_by(Unique_Field_ID, Longitude, Latitude) %>%
+  summarise(
+    Diseased_any = ifelse(any(Disease_state == 1, na.rm = TRUE), 1, 0),
+    .groups = "drop"
+  )
+
+farm_sf <- st_as_sf(farm_status,
+                    coords = c("Longitude", "Latitude"),
+                    crs = 4326)
+
+farm_sf <- st_transform(farm_sf, st_crs(benin_lvl2))
+
+# ---------------------------
+# 3. Spatial join: assign farms to admin 2 regions
+# ---------------------------
+farm_admin <- st_join(farm_sf, benin_lvl2, join = st_within)
+
+
+farm_admin <- farm_admin %>%
+  mutate(
+    adm1_name = ifelse(is.na(adm1_name) & Unique_Field_ID == "F093_0",
+                       "Oueme", adm1_name),
+    adm2_name = ifelse(is.na(adm2_name) & Unique_Field_ID == "F093_0",
+                       "Seme-Kpodji", adm2_name)
+  )
+
+
+# ---------------------------
+# 4. Summary statistics per Admin 2 region
+# ---------------------------
+summary_stats <- farm_admin %>%
+  st_drop_geometry() %>%
+  group_by(adm1_name) %>%   # adjust column name depending on shapefile
+  summarise(
+    Total_fields   = n(),
+    Infected_fields = sum(Diseased_any, na.rm = TRUE),
+    Incidence      = mean(Diseased_any, na.rm = TRUE),
+    SE              = sd(Diseased_any, na.rm = TRUE) / sqrt(n())#, 
+    #Min             = min(Diseased_any, na.rm = TRUE),
+    #Max             = max(Diseased_any, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Incidence))
+
+# ---------------------------
+# 5. Display table
+# ---------------------------
+print(summary_stats)
+
+```
+
+
+With a better projection
+
+```{r, echo=FALSE, warning=FALSE}
+# Merge polygons by department (adm1_name)
+benin_dept <- benin_lvl2 %>%
+  group_by(adm1_name) %>%
+  summarise(geometry = st_union(geometry)) %>%
+  ungroup()
+
+# Compute centroid for each polygons
+dept_labels <- benin_dept %>%
+  st_centroid() %>%
+  st_transform(crs = 4326) %>%  # ensure lat/lon CRS
+  cbind(st_coordinates(.)) %>%  # get LONG/LAT columns
+  as.data.frame() %>%
+  dplyr::rename(Longitude = X, Latitude = Y)
+
+# Map
+ggplot() +
+  # Department polygons with fill and legend
+  geom_sf(data = benin_dept, aes(fill = adm1_name), color = "gray40", size = 0.5, alpha = 0.3) +
+  
+  # Farm points
+  geom_sf(data = data_sf,
+          aes(color = factor(Diseased_any)),
+          size = 1.5, alpha = 0.85) +
+  
+  # Department labels (once per department)
+  geom_text_repel(data = dept_labels,
+                  aes(x = Longitude, y = Latitude, label = adm1_name),
+                  size = 3, fontface = "bold") +
+  
+  # Legend for farm points
+  scale_color_manual(
+    values = c("0" = "#1b9e77", "1" = "#d95f02"),
+    name = "Field Status",
+    labels = c("0" = "All Healthy", "1" = "At least 1 Diseased Plant")
+  ) +
+  
+  # Legend for department fill as squares
+  scale_fill_discrete(name = "Department") +
+  
+  # Scale bar + north arrow
+  annotation_scale(location = "bl", width_hint = 0.25) +
+  annotation_north_arrow(location = "tl", which_north = "true",
+                         style = north_arrow_fancy_orienteering) +
+  
+  # Coordinate system
+  coord_sf() +
+  
+  # Theme
+  theme_minimal(base_size = 15) +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 11)
+  )
+
+### Alternative 
+ggplot() +
+  # Department polygons with fill and legend
+  geom_sf(data = benin_dept, aes(fill = adm1_name), color = "gray40", size = 0.5, alpha = 0.3) +
+  
+  # Farm points
+  geom_sf(data = data_sf,
+          aes(color = factor(Diseased_any)),
+          size = 1.5, alpha = 0.85) +
+  
+  # Legend for farm points
+  scale_color_manual(
+    values = c("0" = "#1b9e77", "1" = "#d95f02"),
+    name = "Field Status",
+    labels = c("0" = "All Healthy", "1" = "At least 1 Diseased Plant")
+  ) +
+  
+  # Legend for department fill as squares
+  scale_fill_discrete(name = "Department") +
+  
+  # Scale bar + north arrow
+  annotation_scale(location = "bl", width_hint = 0.25) +
+  annotation_north_arrow(location = "tl", which_north = "true",
+                         style = north_arrow_fancy_orienteering) +
+  
+  # Coordinate system
+  coord_sf() +
+  
+  # Theme
+  theme_minimal(base_size = 15) +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 13, face = "bold"),
+    legend.text = element_text(size = 11)
+  )
+
+
+```
+
+# Extract climate data 
+
+```{r, echo=FALSE, warning=FALSE}
+library(terra)
+library(sf)
+library(dplyr)
+library(readr)
+
+# 1. Define folder containing climate rasters
+climate_folder <- "/Volumes/KS_Onco/WhiteFliesProject/ClimateTop/"
+
+# 2. List all raster files
+climate_files <- list.files(climate_folder, full.names = TRUE,
+                            pattern = "\\.(tif|nc)$", recursive = TRUE)
+
+# 3. Load boundary for Benin (you already have benin_lvl2 or benin_dept)
+# Just take the outer boundary (country level)
+benin_boundary <- st_union(benin_lvl2) |> vect()
+
+# 4. Crop each raster to Benin extent before resampling
+terraOptions(tempdir = "/Volumes/KS_Onco/tmp")
+
+climate_list <- lapply(climate_files, function(f) {
+  r <- rast(f)
+  r_crop <- crop(r, benin_boundary)        # crop to Benin extent
+  mask(r_crop, benin_boundary)             # mask outside Benin
+})
+
+# 5. Choose a reference (first cropped raster)
+ref <- climate_list[[1]]
+
+# 6. Resample all to same resolution/extent
+climate_resampled <- lapply(climate_list, function(r) {
+  resample(r, ref, method = "bilinear")
+})
+
+# 7. Stack them
+climate_stack <- rast(climate_resampled)
+
+# 8. Prepare farm points as sf
+farm_sf <- data_clean %>%
+  filter(!is.na(Longitude), !is.na(Latitude)) %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326)
+
+# Reproject farm points to match raster CRS
+if (!st_crs(farm_sf) == crs(climate_stack)) {
+  farm_sf <- st_transform(farm_sf, crs(climate_stack))
+}
+
+# 9. Extract climate values
+climate_values <- terra::extract(climate_stack, vect(farm_sf)) %>%
+  dplyr::select(-ID)
+
+# 10. Merge extracted values with farm dataset
+data_climate <- cbind(data_clean %>% filter(!is.na(Longitude)), climate_values)
+
+# 11. Save merged dataset
+write_csv(data_climate, "Merged_Climate_BBTD_Farms.csv")
+
+head(data_climate)
+
+
+```
+Re-classify variables if you started with the new dataset
+
+```{r, echo=FALSE, warning=FALSE}
+data_climate <- read_csv("Merged_Climate_BBTD_Farms.csv")
+
+# Identify all CS columns
+cs_cols <- grep("^CS_", names(data_climate), value = TRUE)
+
+data_climate <- data_climate %>%
+  # Convert selected columns to factors
+  mutate(across(c(Disease_state, Severity, CMV, BSV, BXW, Sigatoka, `Fusarium Wilt`, AgroEco, 
+                  Intercrops, Management, Weediness, all_of(cs_cols)), as.factor)) %>% 
+  dplyr::select(-c(Unique_Field_ID, PlantNumber, Symptoms, Severity,
+            Departement, AgroEco, Commune, Location, TypeFarming  
+            )) %>% 
+  sf::st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326)
+
+dat_cli <- data_climate %>%
+  # Convert selected columns to factors
+  mutate(across(c(Disease_state, Severity, CMV, BSV, BXW, Sigatoka, `Fusarium Wilt`, AgroEco, 
+                  Intercrops, Management, Weediness, all_of(cs_cols)), as.factor)) %>% 
+  dplyr::select(-c( Symptoms, Severity,
+            Departement, AgroEco, Commune, Location, TypeFarming  
+            )) %>% 
+  sf::st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326)
+
+# # Clean and collapse CS columns
+# data_climate_clean <- data_climate %>%
+#   # Convert selected columns to factors
+#   mutate(across(c(Disease_state, Severity, CMV, BSV, BXW, Sigatoka, `Fusarium Wilt`, AgroEco, 
+#                   Intercrops, Management, Weediness, all_of(cs_cols)), as.factor)) %>%
+#   
+#   # Collapse CS columns into a single "CS" column
+#   pivot_longer(cols = all_of(cs_cols), names_to = "CS_crop", values_to = "CS_value") %>%
+#   mutate(CS_crop = sub("^CS_", "", CS_crop)) %>%
+#   filter(CS_value == 1) %>%
+#   select(-CS_value) %>%
+#   
+#   # Aggregate CS crops by other variables
+#   group_by(Disease_state, Severity, CMV, BSV, BXW, Sigatoka, `Fusarium Wilt`, AgroEco,
+#            Intercrops, Management, Weediness, Longitude, Latitude) %>%
+#   summarise(CS = paste(CS_crop, collapse = ", "), .groups = "drop") %>%
+#   
+#   # Convert to sf object
+#   sf::st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326)
+
+
+```
+
+split the matrix 
+
+```{r, echo=FALSE, warning=FALSE}
+
+# Separate numeric and categorical predictors
+num_vars <- data_climate %>% dplyr::select(where(is.numeric))
+cat_vars <- data_climate %>% dplyr::select(where(is.character), where(is.factor))
+
+# Remove numeric vars with >30% NA
+num_vars <- num_vars %>% select(where(~ mean(is.na(.)) < 0.3))
+cat_vars <- cat_vars%>% select(where(~ mean(is.na(.)) < 0.3))
+
+#Remove near-zero variance predictors; a predictor variable in a dataset where almost all values are the same, or the distribution of values is highly unbalanced
+
+
+
+library(recipes)
+# Convert to plain data frame (drop sf class + geometry)
+# Drop geometry first
+dimm <- data_climate %>% 
+  sf::st_drop_geometry()
+
+
+rec <- recipe(Disease_state ~ ., data = dimm) %>%
+  step_unknown(all_nominal_predictors(), new_level = "Unknown") %>%  # ✅ handle NA as "Unknown"
+  step_dummy(all_nominal_predictors()) %>%
+  step_nzv(all_predictors()) %>%
+  step_impute_median(all_numeric_predictors()) %>%
+  step_corr(all_numeric_predictors(), threshold = 0.6) %>%
+  step_lincomb(all_numeric_predictors()) %>%
+  step_normalize(all_numeric_predictors())
+
+
+# Now prep the recipe
+prepped <- prep(rec, training = dimm)
+
+
+# Bake it (apply preprocessing to the dataset)
+final_data <- bake(prepped, new_data = dimm)
+
+# Inspect the result
+dim(final_data)
+head(final_data)
+
+
+
+
+
+```
+
+Prepare dataset for modeling 
+
+```{r, echo=FALSE, warning=FALSE}
+library(dplyr)
+library(caret)
+library(xgboost)
+library(pROC)
+
+# Remove geometry before ML
+ml_data <- final_data
+
+# Ensure outcome is numeric 0/1
+ml_data$Disease_state <- as.numeric(as.character(ml_data$Disease_state))
+
+# Separate numeric and categorical again
+num_features <- ml_data %>% select(where(is.numeric))
+cat_features <- ml_data %>% select(where(is.factor) | where(is.character))
+
+
+pre_proc_num <- preProcess(num_features, method = c("medianImpute"))
+num_features <- predict(pre_proc_num, newdata = num_features)
+
+mode_impute <- function(x) {
+  x[is.na(x)] <- names(sort(table(x), decreasing = TRUE))[1]
+  return(x)
+}
+
+cat_features <- cat_features %>% mutate(across(everything(), mode_impute))
+
+ml_data <- bind_cols(num_features, cat_features)
+
+
+```
+# Modelling 
+
+```{r, echo=FALSE, warning=FALSE}
+set.seed(123)
+train_index <- createDataPartition(ml_data$Disease_state, p = 0.8, list = FALSE)
+train_data <- ml_data[train_index, ]
+test_data <- ml_data[-train_index, ]
+
+# xgboost model
+# Convert Disease_state to numeric 0/1
+train_data$Disease_state <- as.numeric(as.character(train_data$Disease_state))
+train_data$Disease_state <- ifelse(train_data$Disease_state == 0, 0, 1)
+
+test_data$Disease_state <- as.numeric(as.character(test_data$Disease_state))
+test_data$Disease_state <- ifelse(test_data$Disease_state == 0, 0, 1)
+
+# Now convert predictors to dummy variables
+library(fastDummies)
+
+# Training/test matrices for XGBoost
+x_train <- as.matrix(train_data %>% select(-Disease_state))
+y_train <- train_data$Disease_state
+
+x_test <- as.matrix(test_data %>% select(-Disease_state))
+y_test <- test_data$Disease_state
+
+# XGBoost DMatrix
+dtrain <- xgb.DMatrix(data = x_train, label = y_train)
+dtest  <- xgb.DMatrix(data = x_test, label = y_test)
+
+
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "auc"
+)
+
+xgb_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 200,
+  watchlist = list(train = dtrain, eval = dtest),
+  early_stopping_rounds = 10,
+  verbose = 1
+)
+
+importance <- xgb.importance(model = xgb_model)
+head(importance)  # top 20 important predictors
+
+library(ggplot2)
+library(dplyr)
+
+# Select top 20 features by Gain
+top20 <- importance %>%
+  arrange(desc(Gain)) %>%
+  slice_head(n = 20) %>%
+  mutate(Feature = factor(Feature, levels = rev(Feature)))  # for horizontal ordering
+
+library(sensitivity)
+
+# Make sure X is a data.frame
+X <- as.data.frame(x_train)
+Y <- as.numeric(y_train)   # must be numeric vector (0/1)
+
+# Run PRCC with bootstrapping
+prcc_res <- pcc(X, Y, rank = TRUE, nboot = 100)
+
+# Extract results
+prcc_df <- as.data.frame(prcc_res$PRCC)
+prcc_df$Feature <- rownames(prcc_df)
+colnames(prcc_df)
+colnames(prcc_df)[1] <- "PRCC"
+top20 <- importance %>%
+    arrange(desc(Gain)) %>%
+    slice_head(n = 20) %>%
+    left_join(prcc_df, by = "Feature") %>%
+    mutate(Feature = factor(Feature, levels = rev(Feature)))
+
+ggplot(top20, aes(x = Feature, y = Gain, fill = PRCC)) +
+    geom_col() +
+    scale_fill_gradient2(
+        low = "steelblue",
+        mid = "white",
+        high = "firebrick",
+        midpoint = 0,
+        name = "PRCC\n(Direction)"
+    ) +
+    coord_flip() +
+    labs(
+        #title = "Top 20 Predictors of Disease State",
+        x = "Predictors",
+        y = "Importance (Gain)"
+    ) +
+    theme_minimal(base_size = 16) +
+    theme(
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        legend.position = "right",
+        panel.grid.major.y = element_blank()
+    )
+
+
+# Get predictions on test set
+pred <- predict(xgb_model, x_test)
+roc_obj <- roc(y_test, pred)
+
+ggroc(roc_obj, color = "firebrick", size = 1.5) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey60") +
+  labs(
+    title = "Cross-validated ROC Curve",
+    subtitle = paste("AUC =", round(auc(roc_obj), 3)),
+    x = "1 - Specificity",
+    y = "Sensitivity"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(hjust = 0.5)
+  )
+
+
+
+```
+
+
+# What can explain the occurence of the BBTD?
+
+```{r, echo=FALSE, warning=FALSE}
+
+set.seed(123)  # reproducibility
+data_ml <- data_climate %>%
+  dplyr::select(-c(Unique_Field_ID, PlantNumber, 
+            Departement, 
+            Commune, 
+            Location, 
+            AgroEco, 
+            TypeFarming, 
+            CoordPrecision,
+            Latitude,
+            Longitude,
+            Severity, 
+            Symptoms)) %>% 
+  na.omit()   # simple handling of missing values for now
+
+split <- initial_split(data_ml, prop = 0.8, strata = Disease_state)
+train_data <- training(split)
+test_data  <- testing(split)
+
+rec <- recipe(Disease_state ~ ., data = train_data) %>%
+  step_dummy(all_nominal_predictors()) %>%   # convert factors to dummies
+  step_zv(all_predictors()) %>%              # remove zero variance predictors
+  step_normalize(all_numeric_predictors())   # scale numeric features
+
+# rf_model <- rand_forest(mtry = tune(), trees = 500, min_n = tune()) %>%
+#   set_engine("ranger") %>%
+#   set_mode("classification")
+
+rf_model <- rand_forest(mtry = tune(), trees = 500, min_n = tune()) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("classification")
+
+
+wf <- workflow() %>%
+  add_model(rf_model) %>%
+  add_recipe(rec)
+
+set.seed(123)
+cv_folds <- vfold_cv(train_data, v = 5, strata = Disease_state)
+
+tuned <- tune_grid(
+  wf,
+  resamples = cv_folds,
+  grid = 10,
+  metrics = metric_set(roc_auc, accuracy, sens, spec)
+)
+
+best_params <- show_best(tuned, metric = "roc_auc", n = 1)
+
+final_rf <- finalize_workflow(wf, best_params)
+
+final_fit <- last_fit(final_rf, split)
+
+collect_metrics(final_fit)
+
+# Get predictions
+preds <- collect_predictions(final_fit)
+conf_mat <- conf_mat(preds, truth = Disease_state, estimate = .pred_class)
+conf_mat
+
+
+
+final_model <- extract_fit_parsnip(final_fit)
+vip(final_model, num_features = 25)
+
+```
+
+With another framework more powerfull. Let us use the xgboost
+
+## What is XGBoost?
+
+XGBoost (Extreme Gradient Boosting) is a powerful machine learning algorithm that uses boosted decision trees.
+
+* Compared to Random Forest:
+
+RF builds many independent trees (bagging).
+
+XGBoost builds trees sequentially, where each new tree corrects errors of the previous ones (boosting).
+
+It’s fast, handles missing values, works well with tabular data, and often outperforms RF in classification problems like your disease-state prediction.
+
+
+```{r, echo=FALSE, warning=FALSE}
+xgb_model <- boost_tree(
+  trees = 1000,        # number of trees
+  tree_depth = tune(), # depth of each tree
+  learn_rate = tune(), # learning rate (shrinkage)
+  loss_reduction = tune(), # min split gain
+  mtry = tune(),       # predictors per split
+  sample_size = tune() # subsample fraction
+) %>%
+  set_engine("xgboost") %>%
+  set_mode("classification")
+
+wf_xgb <- workflow() %>%
+  add_model(xgb_model) %>%
+  add_recipe(rec)   # same recipe you already built
+
+set.seed(123)
+tuned_xgb <- tune_grid(
+  wf_xgb,
+  resamples = cv_folds,
+  grid = 20,  # more grid points since xgboost has more params
+  metrics = metric_set(roc_auc, accuracy, sens, spec)
+)
+
+
+best_xgb <- select_best(tuned_xgb, metric = "roc_auc")
+final_wf_xgb <- finalize_workflow(wf_xgb, best_xgb)
+final_fit_xgb <- last_fit(final_wf_xgb, split = split)
+collect_metrics(final_fit_xgb)
+
+
+# Extract the trained xgboost model
+final_model_xgb <- extract_fit_parsnip(final_fit_xgb$.workflow[[1]])
+
+# Plot top 15 most important features
+vip(final_model_xgb, num_features = 15) +
+  ggplot2::theme_minimal(base_size = 14) +
+  ggplot2::labs(
+    title = "Top Predictors of Disease State (XGBoost)",
+    x = "Importance",
+    y = "Feature"
+  )
+
+
+```
+
+# Compute the apparent incidence vs true incidence
+
+## Prep for data analysis
+
+```{r, echo=FALSE, warning=FALSE}
+library(tidyverse)
+library(sf)
+library(recipes)
+
+data_climate <- read_csv("Merged_Climate_BBTD_Farms.csv")
+
+# Identify CS columns
+cs_cols <- grep("^CS_", names(data_climate), value = TRUE)
+
+# Convert to factors and prepare spatial object
+dat_cli <- data_climate %>%
+  mutate(across(c(Disease_state, Severity, CMV, BSV, BXW, Sigatoka, 
+                  `Fusarium Wilt`, AgroEco, Intercrops, Management, 
+                  Weediness, all_of(cs_cols)), as.factor)) %>%
+  sf::st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326) %>% 
+  dplyr::select(-c(AgroEco, Symptoms, Severity))
+
+dat_cli <- dat_cli %>% 
+  dplyr::select(c(Unique_Field_ID, PlantNumber, TotalNsucker,
+           SurveyedS, Disease_state,
+           Departement, Fieldsize, 
+           PlantationAge, Distance,
+           NumberCountedField, Intercrops,
+           Management,Weediness, CoordPrecision,  
+           TotalAphid,CS_Maize,
+           ORCDRC_M_sl1_250m_ll_organicMatter,
+           wc2.1_30s_tmax_09, wc2.1_30s_wind_04,
+           geometry 
+           ))
+# Drop geometry before recipe processing
+dimm <- dat_cli %>% sf::st_drop_geometry()
+
+final_data <-  dimm
+
+# Inspect results
+dim(final_data)
+names(final_data)
+
+covs <-c("TotalNsucker", "Fieldsize", "PlantationAge",  
+         "Distance",  "NumberCountedField")                      
+           
+
+```
+## Computing the observed incidence
+
+```{r, echo=FALSE, warning=FALSE}
+
+
+#### Or this with the geocoordinate
+
+
+
+# Plot the prevalence map
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(ggspatial) # for scale bar and north arrow
+
+# Extract coordinates from geometry
+dat_cli_coords <- dat_cli %>%
+  mutate(Longitude = st_coordinates(.)[,1],
+         Latitude = st_coordinates(.)[,2]) %>%
+  st_drop_geometry()
+
+# Compute observed prevalence per farm
+prevalence_per_farm <- dat_cli_coords %>%
+  group_by(Unique_Field_ID, Longitude, Latitude) %>%
+  summarise(
+    diseased_plants = sum(Disease_state == 1, na.rm = TRUE),
+    total_surveyed = sum(SurveyedS, na.rm = TRUE),
+    prevalence = 100 * diseased_plants / total_surveyed,
+    .groups = "drop"
+  ) %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326)
+
+# Read Benin shapefile
+benin_lvl2 <- st_read("/Users/koissi/Downloads/ben/ben_admbnda_adm2_1m_salb_20190816.shp")
+
+# Plot map with north arrow and scale bar
+ggplot() +
+  geom_sf(data = benin_lvl2, fill = "grey95", color = "grey70") +
+  geom_sf(data = prevalence_per_farm, aes(color = prevalence), 
+          size = 1.5, alpha = 0.8) +
+  scale_color_viridis_c(option = "plasma", name = "Incidence (%)") +
+  annotation_scale(
+    location = "bl", # bottom left
+    width_hint = 0.3,
+    bar_cols = c("grey80", "white")
+  ) +
+  annotation_north_arrow(
+    location = "tl", # top left
+    which_north = "true",
+    style = north_arrow_fancy_orienteering
+  ) +
+  theme_minimal() +
+  labs(
+    #title = "Observed BBTD Prevalence per Farm in Benin",
+    #subtitle = "Calculated from field survey data",
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+  theme(
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 12),
+    legend.position = "right"
+  )
+
+
+```
+## Compute true prevalence 
+
+```{r, echo=FALSE, warning=FALSE}
+# Install if not already installed
+# install.packages(c("brms", "tidyverse", "sf", "ggplot2", "ggspatial", "patchwork", "viridis"))
+
+library(brms)
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(ggspatial)
+library(patchwork)
+library(viridis)
+
+# Sensitivity and specificity priors (expert-informed)
+Se_prior <- 0.7   # prior mean (sensitivity)
+Sp_prior <- 0.9   # prior mean (specificity)
+Se_sd <- 0.1
+Sp_sd <- 0.05
+
+# Compute observed prevalence
+prevalence_per_farm <- dat_cli %>%
+  mutate(Longitude = st_coordinates(.)[,1],
+         Latitude = st_coordinates(.)[,2]) %>%
+  st_drop_geometry() %>%
+  group_by(Unique_Field_ID, Longitude, Latitude) %>%
+  summarise(
+    diseased_plants = sum(Disease_state == 1, na.rm = TRUE),
+    total_surveyed = sum(SurveyedS, na.rm = TRUE),
+    prevalence = 100 * diseased_plants / total_surveyed,
+    .groups = "drop"
+  )
+
+# Fit Bayesian measurement-error model
+# Latent p_i = true prevalence
+# Observed X_i ~ Binomial(N_i, Se*p_i + (1 - Sp)*(1 - p_i))
+# Install if needed
+# install.packages(c("cmdstanr","posterior","bayesplot","rstan","sf","tidyverse","ggspatial","patchwork","viridis"))
+# cmdstanr requires CmdStan installed; see cmdstanr docs.
+
+
+library(posterior)
+library(bayesplot)
+library(patchwork)
+library(viridis)
+
+# Convert your plausible Se/Sp ranges to Beta priors (match central 95% to ranges)
+
+# helper: find beta params matching two quantiles
+beta_from_quantiles <- function(q_lo, q_hi, p_lo = 0.025, p_hi = 0.975){
+  # optimize alpha,beta to match quantiles
+  fn <- function(par){
+    a <- par[1]; b <- par[2]
+    if(a <= 0 || b <= 0) return(1e6)
+    s <- (qbeta(p_lo, a, b) - q_lo)^2 + (qbeta(p_hi, a, b) - q_hi)^2
+    return(s)
+  }
+  opt <- stats::optim(c(2,2), fn, method = "L-BFGS-B", lower = c(1e-6,1e-6))
+  return(list(alpha = opt$par[1], beta = opt$par[2], value = opt$value))
+}
+
+# your plausible ranges
+Se_range <- c(0.40, 0.90)
+Sp_range <- c(0.80, 0.99)
+
+Se_beta <- beta_from_quantiles(Se_range[1], Se_range[2])
+Sp_beta <- beta_from_quantiles(Sp_range[1], Sp_range[2])
+
+Se_beta; Sp_beta
+# Use Se_beta$alpha, Se_beta$beta, etc.
+
+
+```
+
+## Prepare data for Stan
+```{r}
+# use the 'final_data' (glimpse provided earlier)
+df <- final_data  # change if your object name differs
+df <- df %>% mutate(disease_obs = as.integer(as.character(Disease_state))) 
+# Ensure Disease_state is 0/1 numeric
+# Step 1: Keep only covariates + outcome
+df_stan <- df %>%
+  dplyr::select(Unique_Field_ID, disease_obs, Departement, all_of(covs)) %>%
+  filter(!is.na(disease_obs)) %>%
+  mutate(across(all_of(covs), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+
+
+# Step 2: Convert categorical variables to numeric dummy variables
+X <- model.matrix(~ .,
+                  data = df_stan %>% 
+                    dplyr::select(all_of(covs))) %>%
+     as.matrix()
+
+stan_data$K <- length(unique(df_stan$field_idx))
+# Step 3: Field index
+field_ids <- df_stan %>%
+  distinct(Unique_Field_ID) %>%
+  arrange(Unique_Field_ID)
+
+df_stan <- df_stan %>%
+  left_join(field_ids %>% mutate(field_idx = row_number()),
+            by = "Unique_Field_ID")
+
+# Step 4: Stan data list
+#set.seed(123)
+stan_data <- list(
+  N = nrow(df_stan),
+  P = ncol(X),
+  K = length(unique(df_stan$field_idx)),
+  field = df_stan$field_idx,
+  X = X,
+  y = df_stan$disease_obs,
+  Se_a = Se_beta$alpha,
+  Se_b = Se_beta$beta,
+  Sp_a = Sp_beta$alpha,
+  Sp_b = Sp_beta$beta
+)
+
+
+# Add Beta prior params for Se/Sp computed earlier:
+stan_data$Se_a <- Se_beta$alpha
+stan_data$Se_b <- Se_beta$beta
+stan_data$Sp_a <- Sp_beta$alpha
+stan_data$Sp_b <- Sp_beta$beta
+#install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+cmdstanr::install_cmdstan()
+
+library(cmdstanr)
+
+mod <- cmdstan_model("~/Desktop/WAVE_project/Theory/CassavaMap/misclass_hier_logit.stan")
+
+```
+### Compilling model
+
+```{r}
+
+fit <- mod$sample(
+  data = stan_data,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  seed = 123,
+  save_cmdstan_config = TRUE
+)
+
+
+
+
+# Extract draws as array
+posterior_array <- fit$draws()  # returns draws_array
+
+# Check parameter names
+dimnames(posterior_array)$variable
+
+# Suppose you want 'p[1]', 'p[2]', ..., 'p[N]'
+library(posterior)
+
+posterior_df <- as_draws_df(posterior_array)
+
+# Select only p[i] columns
+p_cols <- grep("^p\\[", names(posterior_df), value = TRUE)
+posterior_mat <- as.matrix(posterior_df[, p_cols])
+dim(posterior_mat)  # should be n_samples x N
+
+dat_cli_row_coords <- dat_cli %>%
+  mutate(Longitude = st_coordinates(.)[,1],
+         Latitude = st_coordinates(.)[,2]) %>%
+  st_drop_geometry()
+
+
+posterior_long <- as.data.frame(posterior_mat) %>%
+    pivot_longer(
+        cols = everything(),
+        names_to = "field_index",
+        values_to = "p"
+    ) %>%
+    mutate(
+        field_index = as.integer(gsub("p\\[|\\]", "", field_index))
+    ) %>%
+    left_join(
+        dat_cli_row_coords %>%
+            mutate(field_index = row_number()) %>%
+            dplyr::select(field_index, Departement, Unique_Field_ID, Longitude, Latitude),
+        by = "field_index"
+    ) %>%
+    group_by(Unique_Field_ID) %>%
+    summarise(
+        true_prev_median = median(p) * 100,
+        true_prev_lower = quantile(p, 0.025) * 100,
+        true_prev_upper = quantile(p, 0.975) * 100,
+        Longitude = first(Longitude),
+        Latitude = first(Latitude),
+        .groups = "drop"
+    ) %>%
+    st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326)
+
+# Ensure data CRS matches Benin shapefile
+posterior_long_sf <- st_transform(posterior_long, st_crs(benin_lvl2))
+#library(sf)
+
+# Make sure Longitude and Latitude exist in the data
+prevalence_per_farm <- prevalence_per_farm %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326)
+
+# Now you can safely transform the CRS to match benin_lvl2
+prevalence_per_farm <- st_transform(prevalence_per_farm, st_crs(benin_lvl2))
+
+
+
+```
+### True incidence
+
+```{r}
+library(sf)
+library(dplyr)
+
+# Convert observed prevalence to sf
+prevalence_per_farm_sf <- st_as_sf(
+  prevalence_per_farm,
+  coords = c("Longitude", "Latitude"),
+  crs = 4326 # WGS84 (standard for GPS)
+)
+
+# Make sure posterior_long is also sf
+# posterior_long_sf <- st_as_sf(
+#   posterior_df,
+#   coords = c("Longitude", "Latitude"),
+#   crs = 4326
+# )
+
+
+
+library(ggplot2)
+library(sf)
+library(ggspatial)
+library(patchwork)
+
+# --- Define shared color scale limits ---
+common_limits <- c(
+  0,
+  max(
+    c(prevalence_per_farm_sf$prevalence,
+      posterior_long_sf$true_prev_median),
+    na.rm = TRUE
+  )
+)
+
+# --- A. Observed prevalence map ---
+
+
+# --- Define common color limits ---
+common_limits <- c(
+  0,
+  max(
+    c(prevalence_per_farm_sf$prevalence,
+      posterior_long_sf$true_prev_median),
+    na.rm = TRUE
+  )
+)
+##------ Summary stats
+# Ensure CRS alignment
+posterior_long_sf <- st_transform(posterior_long, st_crs(benin_lvl2))
+
+# Spatial join: assign each posterior point to its Department (Admin 1)
+posterior_admin <- st_join(posterior_long_sf, benin_lvl2, join = st_within)
+
+# Summarize posterior-based incidence per Department (adm1_name)
+posterior_summary <- posterior_admin %>%
+  st_drop_geometry() %>%
+  group_by(adm1_name) %>%
+  summarise(
+    True_prev_median = mean(true_prev_median, na.rm = TRUE),
+    True_prev_lower = mean(true_prev_lower, na.rm = TRUE),
+    True_prev_upper = mean(true_prev_upper, na.rm = TRUE),
+    N_fields = n()
+  ) %>%
+  arrange(desc(True_prev_median))
+
+# View results
+posterior_summary
+
+
+# --- A. Observed prevalence map ---
+p_obs <- ggplot() +
+  geom_sf(data = benin_lvl2, fill = "grey95", color = "grey70") +
+  geom_sf(data = prevalence_per_farm_sf,
+          aes(fill = prevalence),
+          size = 2.5, shape = 21, color = "black", alpha = 0.9, stroke = 0.15) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    name = "BBTD Incidence (%)",
+    limits = common_limits
+  ) +
+  labs(title = "A. Observed BBTD Incidence") +
+  annotation_scale(
+    location = "bl",
+    width_hint = 0.4,   # wider for 100 km
+    bar_cols = c("grey80", "white"),
+    text_cex = 0.9,
+    line_width = 0.8
+  ) +
+  annotation_north_arrow(
+    location = "tl",
+    which_north = "true",
+    style = north_arrow_fancy_orienteering
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major = element_line(color = "grey90"),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "right"
+  )
+
+# --- B. True prevalence map ---
+p_true <- ggplot() +
+  geom_sf(data = benin_lvl2, fill = "grey95", color = "grey70") +
+  geom_sf(data = posterior_long_sf,
+          aes(fill = true_prev_median),
+          size = 2.5, shape = 21, color = "black", alpha = 0.9, stroke = 0.15) +
+  scale_fill_viridis_c(
+    option = "plasma",
+    name = "BBTD Incidence (%)",
+    limits = common_limits
+  ) +
+  labs(title = "B. Estimated True BBTD Incidence (95% CI)") +
+  annotation_scale(
+    location = "bl",
+    width_hint = 0.4,
+    bar_cols = c("grey80", "white"),
+    text_cex = 0.9,
+    line_width = 0.8
+  ) +
+  annotation_north_arrow(
+    location = "tl",
+    which_north = "true",
+    style = north_arrow_fancy_orienteering
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major = element_line(color = "grey90"),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.position = "right"
+  )
+
+
+
+# --- Combine side-by-side ---
+p_obs | p_true
+
+######------- Stat at the Department level
+data_list <- list(
+  N = nrow(summary_stats),
+  y = ifelse(is.na(summary_stats$Infected_fields), 0, summary_stats$Infected_fields),
+  n = ifelse(is.na(summary_stats$Total_fields), 0, summary_stats$Total_fields),
+  Se_a = Se_beta$alpha,
+  Se_b = Se_beta$beta,
+  Sp_a = Sp_beta$alpha,
+  Sp_b = Sp_beta$beta
+)
+
+mod <- cmdstan_model("model.stan")
+fit <- mod$sample(
+  data = data_list,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  seed = 123
+)
+departments <- unique(summary_stats$adm1_name)
+
+# Extract summary for p_true
+posterior_summary_admin <- fit$summary("p_true") %>%
+  as.data.frame() %>%
+  mutate(
+    Departement = summary_stats$adm1_name,  # make sure the order matches
+    Posterior_mean_incidence = mean*100,
+    Posterior_SE = sd,
+    Posterior_Lower = q5,
+    Posterior_Upper = q95
+  ) %>%
+  select(Departement, Posterior_mean_incidence, Posterior_SE, Posterior_Lower, Posterior_Upper)
+
+posterior_summary_admin
+
+
+# Join observed and Bayesian summaries
+summary_compare <- summary_stats %>%
+  left_join(
+    posterior_summary_admin,
+    by = c("adm1_name" = "Departement")
+  ) %>%
+  mutate(
+    Bias = Posterior_mean_incidence - Observed_incidence
+  ) %>%
+  select(
+    adm1_name, Total_fields, Infected_fields, Observed_incidence,
+    Posterior_mean_incidence, Posterior_SE, Posterior_Lower, Posterior_Upper,
+    Bias
+  )
+
+summary_compare
+
+
+
+```
+
+
+## Wavefront detection
+
+```{r, echo=FALSE, warning=FALSE}
+data2 <- read_csv("/Users/koissi/Downloads/banana_wave_2018.csv")
+
+# 1️⃣ Rename columns in data2 to match those in final_data
+data2_renamed <- data2 %>%
+  rename(
+    Unique_Field_ID = id,
+    Latitude = lat,
+    Longitude = lon,
+    Departement = NAME_1,
+    Commune = NAME_2,
+    Disease_state = BBTD_inc
+  ) %>% 
+  select(-c(NAME_3, country_name, adm0_name,
+            country_iso3, crop, date_created_unixtimestamp , 
+            pest, source,
+            date_created, date_accessed, date_created_unixtimestamp)) %>% 
+  relocate( Disease_state, year, .after = year)
+
+# 2️⃣ Add the year column (since final_data is from 2025)
+dat <- data_climate %>%
+  mutate(year = 2025) %>% 
+  dplyr::select(Unique_Field_ID,Latitude,
+         Longitude, Departement,
+         Commune, Disease_state, year)
+
+# 3️⃣ Join datasets on Unique_Field_ID
+merged_data <- dat %>%
+  rbind(data2_renamed)
+
+## Compute true incidence per polygon
+
+#Define the sensitivity and specificity 
+
+# --- Priors (expert-informed) ---
+Se_range <- c(0.40, 0.90)
+Sp_range <- c(0.80, 0.99)
+
+# Beta function to match quantiles
+beta_from_quantiles <- function(q_lo, q_hi, p_lo = 0.025, p_hi = 0.975){
+  fn <- function(par){
+    a <- par[1]; b <- par[2]
+    if(a <= 0 || b <= 0) return(1e6)
+    s <- (qbeta(p_lo, a, b) - q_lo)^2 + (qbeta(p_hi, a, b) - q_hi)^2
+    return(s)
+  }
+  opt <- stats::optim(c(2, 2), fn, method = "L-BFGS-B", lower = c(1e-6, 1e-6))
+  list(alpha = opt$par[1], beta = opt$par[2])
+}
+
+Se_beta <- beta_from_quantiles(Se_range[1], Se_range[2])
+Sp_beta <- beta_from_quantiles(Sp_range[1], Sp_range[2])
+
+
+# Convert merged_data to sf object
+merged_sf <- merged_data %>%
+  filter(!is.na(Longitude), !is.na(Latitude)) %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326)
+
+benin_lvl2 <- benin_lvl2 %>% 
+  rename(Commune = adm2_name,
+         Departement = adm1_name)
+
+
+# Spatial join: assign Commune where missing
+merged_filled <- merged_sf %>%
+  st_join(benin_lvl2 %>% select(Commune, Departement), join = st_intersects) %>%
+  mutate(
+    Commune = ifelse(is.na(Commune.x), Commune.y, Commune.x),
+    Departement = ifelse(is.na(Departement.x), Departement.y, Departement.x)
+  ) %>%
+  select(-Commune.x, -Commune.y, -Departement.x, -Departement.y)
+
+## Extract Coordinate 
+merged_filled_coords <- merged_filled %>%
+  mutate(
+    Longitude = st_coordinates(.)[, 1],
+    Latitude = st_coordinates(.)[, 2],
+    year = ifelse(is.na(year), 2025, year), 
+    disease_obs = as.integer(Disease_state)
+  ) %>%
+  st_drop_geometry()
+
+
+
+
+# Create a unique field index
+field_ids <- merged_filled_coords %>%
+  distinct(Unique_Field_ID, year, Commune, Departement, Latitude, Longitude) %>%
+  arrange(Unique_Field_ID, year, Commune, Departement,) %>%
+  mutate(field_idx = row_number())
+
+
+dft_stan <- merged_filled_coords %>%
+  left_join(field_ids, by = "Unique_Field_ID")
+
+# Create list of stan
+stan_data <- list(
+  N = nrow(dft_stan),
+  K = length(unique(dft_stan$field_idx)),
+  field = dft_stan$field_idx,
+  y = dft_stan$disease_obs,
+  Se_a = Se_beta$alpha,
+  Se_b = Se_beta$beta,
+  Sp_a = Sp_beta$alpha,
+  Sp_b = Sp_beta$beta
+)
+
+# Model
+mod <- cmdstanr::cmdstan_model("~/Desktop/WAVE_project/Theory/CassavaMap/misclass_hier_logit_nocov.stan")
+
+fit <- mod$sample(
+  data = stan_data,
+  chains = 4,
+  parallel_chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 1000,
+  seed = 123
+)
+
+## Join with the posterieur
+
+posterior_long <- as_draws_df(fit$draws()) %>%
+  select(starts_with("p[")) %>%
+  pivot_longer(everything(), names_to = "field_index", values_to = "p") %>%
+  mutate(field_index = as.integer(gsub("p\\[|\\]", "", field_index))) %>%
+  left_join(field_ids, by = c("field_index" = "field_idx")) %>%
+  group_by(Unique_Field_ID, Commune, Departement, year) %>%
+  summarise(
+    true_prev_median = median(p) * 100,
+    true_prev_lower = quantile(p, 0.025) * 100,
+    true_prev_upper = quantile(p, 0.975) * 100,
+    .groups = "drop"
+  )
+
+
+
+
+library(dplyr)
+library(sf)
+library(stringi)
+library(ggplot2)
+library(viridis)
+library(ggspatial)
+library(purrr)
+library(akima)
+
+# --- 1️⃣ Harmonize names in all data ----
+posterior_spatial <- posterior_long %>%
+  left_join(
+    merged_filled_coords %>%
+      select(Unique_Field_ID, Longitude, Latitude),
+    by = "Unique_Field_ID"
+  ) %>%
+  filter(!is.na(Longitude), !is.na(Latitude)) %>%
+  mutate(
+    Commune = stri_trans_general(Commune, "Latin-ASCII"),
+    Commune = str_to_lower(str_trim(Commune)),
+    Departement = stri_trans_general(Departement, "Latin-ASCII"),
+    Departement = str_to_lower(str_trim(Departement))
+  ) %>% 
+  drop_na()
+
+benin_lvl2 <- benin_lvl2 %>%
+  mutate(
+    Commune = stri_trans_general(Commune, "Latin-ASCII"),
+    Commune = str_to_lower(str_trim(Commune)),
+    Departement = stri_trans_general(Departement, "Latin-ASCII"),
+    Departement = str_to_lower(str_trim(Departement))
+  )
+
+# --- 2️⃣ Compute commune-level posterior medians per year ----
+commune_prev <- posterior_spatial %>%
+  group_by(Departement, Commune, year) %>%
+  summarise(
+    commune_prev_median = median(true_prev_median, na.rm = TRUE),
+    n_farms = n(),
+    .groups = "drop"
+  ) %>% 
+  drop_na()
+
+# --- 3️⃣ Join shapefile and posterior summaries ----
+benin_map_all <- left_join(
+  benin_lvl2,
+  commune_prev,
+  by = c("Commune", "Departement")
+) %>% 
+  filter(!is.na(year))
+
+# --- 4️⃣ Create isocontours for each year ----
+# Define interpolation and contouring function
+make_isocontour <- function(data_year, benin_lvl2) {
+  if (nrow(data_year) == 0) return(NULL)
+  
+  data_year <- data_year %>%
+    mutate(
+      Longitude_j = Longitude + runif(n(), 0, 1e-6),
+      Latitude_j  = Latitude + runif(n(), 0, 1e-6)
+    )
+  
+  interp_data <- akima::interp(
+    x = data_year$Longitude_j,
+    y = data_year$Latitude_j,
+    z = data_year$true_prev_median / 100,
+    duplicate = "mean",
+    linear = TRUE,
+    extrap = TRUE
+  )
+  
+  z_min <- min(interp_data$z, na.rm = TRUE)
+  z_max <- max(interp_data$z, na.rm = TRUE)
+  thresholds <- seq(z_min + 1e-5, z_max, length.out = 5)
+  
+  iso <- isobands(
+    x = interp_data$x,
+    y = interp_data$y,
+    z = interp_data$z,
+    levels_low = thresholds[-length(thresholds)],
+    levels_high = thresholds[-1]
+  )
+  
+  iso_sfg <- iso %>%
+    keep(~length(.x$x) > 0) %>%
+    map(~tryCatch(iso_to_sfg(.x), error = function(e) NULL)) %>%
+    compact() %>%
+    flatten()
+  
+  if (length(iso_sfg) == 0) return(NULL)
+  
+  iso_sf <- st_sfc(iso_sfg, crs = st_crs(benin_lvl2)) %>%
+    st_sf(level = thresholds[seq_along(iso_sfg)], geometry = .)
+  
+  iso_sf
+}
+library(isoband)
+
+# Generate contours per year
+iso_list <- posterior_spatial %>%
+  split(.$year) %>%
+  map(~make_isocontour(.x, benin_lvl2))
+
+# --- 5️⃣ Combine and plot all years ----
+ggplot() +
+  geom_sf(data = benin_lvl2, fill = "grey90", color = "grey70", size = 0.2) +
+  geom_sf(data = benin_map_all, aes(fill = commune_prev_median),
+          color = "grey40", size = 0.25) +
+  scale_fill_viridis_c(option = "magma", name = "Prevalence (%)",
+                       na.value = "transparent") +
+  geom_sf(data = do.call(rbind, iso_list), color = "red", fill = NA, size = 1) +
+  facet_wrap(~year, ncol = 4) +
+  annotation_scale(location = "bl", width_hint = 0.3, text_cex = 0.7,
+                   bar_cols = c("grey20", "white")) +
+  annotation_north_arrow(location = "tl", which_north = "true",
+                         height = unit(1, "cm"), width = unit(1, "cm"),
+                         style = north_arrow_fancy_orienteering) +
+  labs(
+    title = "True Incidence Across Benin Communes (Posterior Median Estimates)",
+    subtitle = "Non-sampled communes shown in grey transparency",
+    x = "Longitude (°E)", y = "Latitude (°N)"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10, face = "bold"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 10, hjust = 0.5),
+    legend.position = "bottom",
+    panel.grid = element_blank()
+  )
+
+#### Isocontour 
+
+library(dplyr)
+library(purrr)
+library(akima)
+library(isoband)
+library(sf)
+library(geosphere)
+library(ggplot2)
+library(viridis)
+library(ggspatial)
+library(stringi)
+
+# --- 1️⃣ Prepare spatial posterior data ----
+posterior_spatial <- posterior_long %>%
+  left_join(
+    merged_filled_coords %>% select(Unique_Field_ID, Longitude, Latitude),
+    by = "Unique_Field_ID"
+  ) %>%
+  filter(!is.na(Longitude), !is.na(Latitude)) %>%
+  mutate(
+    Commune = stri_trans_general(Commune, "Latin-ASCII"),
+    Commune = str_to_lower(str_trim(Commune)),
+    Departement = stri_trans_general(Departement, "Latin-ASCII"),
+    Departement = str_to_lower(str_trim(Departement))
+  ) %>%
+  drop_na()
+
+# Ensure both posterior_spatial and benin_lvl2 use the same CRS
+posterior_spatial <- posterior_spatial %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326, remove = FALSE)
+
+if (st_crs(benin_lvl2) != st_crs(posterior_spatial)) {
+  benin_lvl2 <- st_transform(benin_lvl2, st_crs(posterior_spatial))
+}
+
+
+
+benin_lvl2 <- st_transform(benin_lvl2, 4326)
+
+posterior_spatial <- posterior_spatial %>%
+  st_as_sf(coords = c("Longitude", "Latitude"), crs = 4326) %>%
+  st_transform(32631)
+
+yearly_thresholds <- posterior_spatial %>%
+  group_by(year) %>%
+  summarise(thresh = quantile(true_prev_median, 0.85, na.rm = TRUE))
+
+first_year <- min(posterior_spatial$year)
+origin <- posterior_spatial %>%
+  filter(year == first_year) %>%
+  filter(true_prev_median == max(true_prev_median, na.rm = TRUE)) %>%
+  dplyr::slice(1) %>%
+  select(Longitude, Latitude)
+
+Theta <- c(origin$Longitude, origin$Latitude)
+
+
+make_isocontour_05 <- function(data_year, boundary_sf, threshold) {
+  # Remove duplicates
+  data_year <- data_year %>% distinct(Longitude, Latitude, .keep_all = TRUE)
+
+  # Interpolate
+  interp_data <- akima::interp(
+    x = data_year$Longitude,
+    y = data_year$Latitude,
+    z = data_year$true_prev_median,
+    duplicate = "mean"
+  )
+
+  # Extract contour lines at threshold
+  contour_list <- contourLines(interp_data, levels = threshold)
+  if (length(contour_list) == 0) return(NULL)
+
+  # Convert to sf MULTILINESTRING object
+  contour_sf <- map(contour_list, ~ st_linestring(cbind(.x$x, .x$y))) %>%
+    st_sfc(crs = 4326) %>%       # make it a proper geometry collection
+    st_sf(geometry = .)          # wrap as sf
+
+  # Clip to Benin boundaries (ensure same CRS)
+  if (st_crs(contour_sf) != st_crs(boundary_sf)) {
+    boundary_sf <- st_transform(boundary_sf, st_crs(contour_sf))
+  }
+
+  contour_sf <- suppressWarnings(st_intersection(contour_sf, boundary_sf))
+
+  return(contour_sf)
+}
+
+
+iso_list <- posterior_spatial %>%
+  split(.$year) %>%
+  imap(~ make_isocontour_05(
+    .x, benin_lvl2,
+    threshold = yearly_thresholds$thresh[
+      yearly_thresholds$year == as.numeric(.y)
+    ]
+  )) %>%
+  compact()  # remove NULLs
+
+
+iso_all <- imap_dfr(iso_list, function(x, y) {
+  if (inherits(x, "list")) x <- st_as_sf(do.call(rbind, x))  # flatten if needed
+  if (!inherits(x, "sf")) return(NULL)
+  x$year <- as.numeric(y)
+  x
+})
+# Epi front
+p1 <- ggplot() +
+  geom_sf(data = benin_lvl2, fill = "grey95", color = "grey80") +
+  geom_sf(data = iso_all, aes(color = year), fill = NA, size = 1.1) +
+  geom_point(aes(x = Theta[1], y = Theta[2]), color = "black", size = 3) +
+  scale_color_viridis_c(option = "plasma", direction = 1) +
+  labs(
+    title = "Temporal Progression of Infection Front (p = 0.5)",
+    subtitle = sprintf("Origin Θ = (%.3f, %.3f)", Theta[1], Theta[2]),
+    x = "Longitude", y = "Latitude", color = "Year"
+  ) +
+  theme_minimal()
+print(p1)
+
+# Direction of epidemics
+front_positions <- iso_all %>%
+  group_by(year) %>%
+  summarise(center = st_centroid(st_union(geometry))) %>%
+  arrange(year)
+
+arrow_data <- st_coordinates(front_positions$center) %>%
+  as.data.frame() %>%
+  mutate(year = front_positions$year)
+
+library(ggplot2)
+library(ggspatial)
+library(viridis)
+
+library(ggplot2)
+library(sf)
+library(dplyr)
+library(ggspatial)
+library(viridis)
+
+# Create one label position per department
+benin_labels <- benin_lvl2 %>%
+  group_by(Departement) %>%
+  summarise(geometry = st_union(geometry)) %>%
+  st_centroid()
+
+# Shuffle department levels for more visual contrast between neighbors
+benin_lvl2$Departement <- factor(benin_lvl2$Departement,
+                                 levels = sample(unique(benin_lvl2$Departement)))
+
+ggplot() +
+  # Base map: departments with more distinct colors, transparent fills
+  geom_sf(data = benin_lvl2,
+          aes(fill = Departement),
+          color = "grey50",
+          alpha = 0.35) +
+
+  # Isocontours by year (epidemic fronts)
+  geom_sf(data = iso_all, aes(color = year), fill = NA, linewidth = 1.1) +
+
+  # Arrow showing epidemic direction
+  geom_path(data = arrow_data, aes(X, Y),
+            color = "black",
+            arrow = arrow(length = unit(0.3, "cm")),
+            linewidth = 1) +
+
+  # Origin point
+  geom_point(aes(x = Theta[1], y = Theta[2]),
+             color = "blue", size = 3) +
+
+  # Department names at centroids
+  geom_sf_text(data = benin_labels,
+               aes(label = Departement),
+               size = 3.5,
+               color = "black",
+               fontface = "italic",
+               check_overlap = TRUE) +
+
+  # Color scales
+  scale_color_viridis_c(option = "plasma", direction = 1, name = "Year") +
+  scale_fill_viridis_d(option = "turbo", guide = "none") +  # No legend for departments
+
+  # Scale bar and north arrow
+  annotation_scale(location = "bl", width_hint = 0.3) +
+  annotation_north_arrow(location = "tl", which_north = "true",
+                         style = north_arrow_fancy_orienteering()) +
+
+  # Labels
+  labs(
+    subtitle = sprintf("Origin Θ = (%.3f, %.3f)", Theta[1], Theta[2]),
+    x = "Longitude",
+    y = "Latitude"
+  ) +
+
+  # Theme
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.grid.major = element_line(color = "grey90", linetype = "dashed"),
+    panel.grid.minor = element_blank(),
+    legend.position = "right",
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    plot.subtitle = element_text(size = 12)
+  )
+
+
+#-------Some statistics-------======
+library(geosphere)  # for great-circle distance
+
+# Origin coordinates
+origin <- Theta  # e.g., c(2.5, 9.3)
+
+# Ensure contours are valid SF geometries
+iso_all <- st_make_valid(iso_all)
+
+# If your contours are LINESTRINGs, convert to POLYGONs for area calculations
+iso_poly <- st_cast(iso_all, "MULTILINESTRING", warn = FALSE)
+
+# Compute centroids and areas
+library(sf)
+library(dplyr)
+
+# Ensure geometries are in UTM
+iso_poly_m <- st_transform(iso_poly, 32631) 
+origin_m <- st_sfc(st_point(origin), crs = 4326) %>% st_transform(32631)
+
+library(units)
+
+iso_summary <- iso_poly_m %>%
+  group_by(year) %>%
+  summarise(
+    threshold = 0.5,
+    n_contours = sum(!st_is_empty(geometry)),
+    
+    mean_distance_km = {
+      centroids <- st_centroid(geometry)
+      centroids <- centroids[!st_is_empty(centroids)]
+      if(length(centroids) == 0) NA
+      else mean(st_distance(centroids, origin_m)) / 1000
+    },
+    
+    max_distance_km = {
+      centroids <- st_centroid(geometry)
+      centroids <- centroids[!st_is_empty(centroids)]
+      if(length(centroids) == 0) NA
+      else max(st_distance(centroids, origin_m)) / 1000
+    },
+    
+    area_km2 = {
+      # buffer lines by small distance (e.g., 100 m) to get polygon
+      polys <- st_buffer(geometry, dist = 100)  
+      polys <- polys[!st_is_empty(polys)]
+      if(length(polys) == 0) NA
+      else sum(set_units(st_area(polys), km^2))
+    },
+    
+    .groups = "drop"
+  )
+
+
+#===============
+# Recompute the distance and estimate the uncertainties 
+
+library(dplyr)
+library(segmented)  # For piecewise regression
+
+# --- Assume you have posterior samples in a list ---
+# posterior_samples <- list(df1, df2, ...) 
+# Each df has columns: field_id, t, prob_infected, x, y
+
+posterior_samples <- posterior_spatial %>%
+  st_drop_geometry() %>%  # remove geometry for computation
+  split(.$year) 
+
+
+calculate_front <- function(df, origin) {
+  df %>%
+    mutate(dist = sqrt((Longitude - origin[1])^2 + (Latitude - origin[2])^2)) %>%
+    summarise(
+      D_t = sum(dist * true_prev_median) / sum(true_prev_median),
+      t = unique(year)
+    )
+}
+
+
+# --- Step 1: Compute front positions for each posterior sample ---
+front_positions_list <- lapply(posterior_samples, calculate_front, origin = Theta)
+
+# Combine into a single dataframe for analysis
+front_positions <- bind_rows(front_positions_list, .id = "sample_id")
+
+# --- Step 2: Linear regression for each posterior sample ---
+lm_fit <- lm(D_t ~ t, data = front_positions)
+summary(lm_fit)
+velocity_IC <- confint(lm_fit)["t", ]
+#---------
+# Add predictions and residuals
+front_positions <- front_positions %>%
+  mutate(pred = predict(lm_fit),
+         resid = residuals(lm_fit))
+
+# Plot actual vs fitted line
+ggplot(front_positions, aes(x = t, y = D_t)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_line(aes(y = pred), color = "darkorange", linewidth = 1) +
+  geom_segment(aes(xend = t, yend = pred), color = "gray60", linetype = "dashed") +
+  geom_text(aes(label = round(resid, 2)), vjust = -1, color = "black", size = 3.5) +
+  theme_minimal(base_size = 14) +
+  labs(x = "Year", y = "Mean front distance (km)",
+       title = "BBTV front progression and linear fit",
+       subtitle = "Dashed lines show residuals (deviation from linear trend)")
+
+
+
+
+
+##======= Segmented regression
+library(segmented)
+
+# Try segmented regression with an initial guess near mid-time
+try({
+  seg_fit <- segmented(lm_fit, seg.Z = ~t, psi = list(t = median(front_positions$t)))
+  summary(seg_fit)
+  
+  # Plot the fitted segmented model
+  plot(front_positions$t, front_positions$D_t, pch = 16,
+       xlab = "Year", ylab = "Mean front distance (km)",
+       main = "Segmented regression: testing for change in spread velocity")
+  plot(seg_fit, add = TRUE, col = "red", lwd = 2)
+}, silent = FALSE)
+
+ggplot(front_positions, aes(x = t, y = D_t)) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_smooth(method = "loess", span = 0.8, se = TRUE, color = "red", linewidth = 1.2) +
+  #geom_segment(aes(xend = t, yend = pred), color = "gray60", linetype = "dashed") +
+  #geom_text(aes(label = round(resid, 2)), vjust = -1, color = "black", size = 3.5) +
+  theme_minimal(base_size = 14) +
+  labs(x = "Year", y = "Mean front distance (km)",
+       title = "Smoothed BBTV front velocity trend",
+       subtitle = "A visible slope increase around 2020–2022 indicates acceleration")
+
+
+
+```
+
+
+
+## Method in R:
+
+Use spatial interpolation (e.g., kriging or inverse distance weighting) to map prevalence continuously across the landscape.
+
+Identify the contour line corresponding to a low prevalence threshold (e.g., 5–10%) as the “front.”
+
+
+
+
+```{r, echo=FALSE}
+
+library(dplyr)
+library(ggplot2)
+library(sf)
+
+# ---- 1. Compute mean vector from your gradient data ----
+# grad_sub should contain columns x, y, dx, dy
+dominant_vec <- grad_sub %>%
+  summarise(dx = mean(dx, na.rm = TRUE),
+            dy = mean(dy, na.rm = TRUE),
+            x = mean(x, na.rm = TRUE),
+            y = mean(y, na.rm = TRUE))
+
+# ---- 2. Plot the map + IDW surface (transparent) ----
+ggplot() +
+  geom_sf(data = benin_lvl3 , fill = "white", color = "black") +
+  geom_raster(data = r_pts, aes(x=x, y=y, fill=pred), alpha=0.6) +   # transparent IDW
+  scale_fill_viridis_c(option="plasma", direction=-1, name="True Prevalence") +
+
+  # ---- 3. Plot only the dominant direction ----
+  geom_segment(data = dominant_vec,
+               aes(x = x, y = y, xend = x + dx, yend = y + dy),
+               arrow = arrow(length = unit(0.3, "cm")),
+               size = 1.2, color = "black") +
+
+  coord_sf() +
+  theme_minimal() +
+  labs(title = "Dominant Direction of Epidemic Spread",
+       fill = "True Prevalence")
+
+
+```
+
+
+Is there any spatial cluster within the data?
