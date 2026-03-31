@@ -83,3 +83,12 @@ fit <- model$sample(
   seed = 123
 )
 ```
+
+🛠️ Installation
+
+1️⃣ Clone repository
+
+```bash
+git clone https://github.com/your-username/your-repo.git
+cd your-repo
+```
