@@ -36,9 +36,8 @@ Facilitate peer verification and extension of the work
 
 The analysis is organized around a central R Markdown document:
 
-🔹  ```bash 
-BBTV_P.Rmd
-```
+🔹  BBTV_P.Rmd
+
 This file serves as the main reproducible pipeline, integrating:
 
 Data import and preprocessing
