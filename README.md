@@ -40,11 +40,11 @@ Main Pipeline
 
 BBTV_P.Rmd orchestrates the entire workflow:
 
-Loads and preprocesses data
-Sources helper scripts
-Compiles and runs Stan models
-Extracts posterior distributions
-Generates figures and tables
+* Loads and preprocesses data
+* Sources helper scripts
+* Compiles and runs Stan models
+* Extracts posterior distributions
+* Generates figures and tables
 
 🧠 Bayesian Modeling (Stan Integration)
  * 📌 Stan Files*
@@ -57,6 +57,6 @@ Generates figures and tables
 
 These files contain:
 
-Model structure (likelihood + priors)
-Parameter definitions
-Generated quantities (if applicable)
+* Model structure (likelihood + priors)
+* Parameter definitions
+* Generated quantities (if applicable)
