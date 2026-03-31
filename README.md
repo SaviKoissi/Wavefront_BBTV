@@ -132,3 +132,9 @@ Render the full pipeline:
 ```R
 rmarkdown::render("BBTV_P.Rmd")
 ```
+
+🧾 Citation
+
+```bash
+Savi MK, Ahanhanzo C, Tiendrébéogo F, Eni AO and Pita JS (2026) Spatial dynamics and hidden spread of banana bunchy top disease in Benin. Front. Agron. 8:1754220. doi: 10.3389/fagro.2026.1754220
+```
