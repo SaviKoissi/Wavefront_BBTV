@@ -31,3 +31,19 @@ Facilitate peer verification and extension of the work
 ├── README.md              # Project documentation
 └── environment.yml / renv.lock  # Dependency management (if applicable)
 ```
+
+⚙️ Workflow Overview
+
+The analysis is organized around a central R Markdown document:
+
+🔹  ```bash 
+BBTV_P.Rmd
+```
+This file serves as the main reproducible pipeline, integrating:
+
+Data import and preprocessing
+Statistical analyses
+Visualization
+Interpretation aligned with manuscript results
+
+It calls multiple external scripts located in /scripts/ to ensure modularity and clarity.
