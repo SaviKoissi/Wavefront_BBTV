@@ -18,3 +18,13 @@ Ensure full reproducibility of the study
 Provide transparent access to data processing and statistical analysis
 Enable reuse and adaptation of the pipeline for similar studies
 Facilitate peer verification and extension of the work
+
+📂 Repository Structure
+.
+├── data/                  # Raw and processed datasets (if shareable)
+├── scripts/               # Modular R scripts used across the analysis
+├── outputs/               # Generated results (tables, figures)
+├── figures/               # Final figures used in manuscript
+├── BBTV_P.Rmd             # Main R Markdown analysis workflow
+├── README.md              # Project documentation
+└── environment.yml / renv.lock  # Dependency management (if applicable)
