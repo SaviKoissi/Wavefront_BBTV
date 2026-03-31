@@ -36,13 +36,27 @@ Facilitate peer verification and extension of the work
 
 The analysis is organized around a central R Markdown document:
 
-🔹  BBTV_P.Rmd
+Main Pipeline
 
-This file serves as the main reproducible pipeline, integrating:
+BBTV_P.Rmd orchestrates the entire workflow:
 
-Data import and preprocessing
-Statistical analyses
-Visualization
-Interpretation aligned with manuscript results
+Loads and preprocesses data
+Sources helper scripts
+Compiles and runs Stan models
+Extracts posterior distributions
+Generates figures and tables
 
-It calls multiple external scripts located in /scripts/ to ensure modularity and clarity.
+🧠 Bayesian Modeling (Stan Integration)
+ * 📌 Stan Files*
+
+ All Bayesian models are defined in:
+ 
+```bash
+/stan/*.stan
+```
+
+These files contain:
+
+Model structure (likelihood + priors)
+Parameter definitions
+Generated quantities (if applicable)
