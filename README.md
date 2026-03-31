@@ -20,6 +20,8 @@ Enable reuse and adaptation of the pipeline for similar studies
 Facilitate peer verification and extension of the work
 
 📂 Repository Structure
+
+```bash
 .
 ├── data/                  # Raw and processed datasets (if shareable)
 ├── scripts/               # Modular R scripts used across the analysis
@@ -28,3 +30,4 @@ Facilitate peer verification and extension of the work
 ├── BBTV_P.Rmd             # Main R Markdown analysis workflow
 ├── README.md              # Project documentation
 └── environment.yml / renv.lock  # Dependency management (if applicable)
+```
