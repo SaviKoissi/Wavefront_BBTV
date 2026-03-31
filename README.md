@@ -92,3 +92,43 @@ fit <- model$sample(
 git clone https://github.com/your-username/your-repo.git
 cd your-repo
 ```
+
+2️⃣ Install R dependencies
+
+```R
+install.packages(c(
+  "tidyverse",
+  "rmarkdown",
+  "cmdstanr",   # or rstan
+  "posterior",
+  "bayesplot"
+))
+```
+
+3️⃣ Install Stan
+
+* Option A: CmdStan (recommended)
+
+```R
+cmdstanr::install_cmdstan()
+```
+
+Verify installation:
+
+```R
+cmdstanr::cmdstan_version()
+```
+
+Option B: RStan
+
+```bash
+Requires system C++ toolchain (more setup-heavy).
+```
+
+▶️ Running the Analysis
+
+Render the full pipeline:
+
+```R
+rmarkdown::render("BBTV_P.Rmd")
+```
