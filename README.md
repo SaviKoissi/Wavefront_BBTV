@@ -14,10 +14,10 @@ This repository contains all scripts and workflows required to reproduce the ana
 
 The purpose of this repository is to:
 
-Ensure full reproducibility of the study
-Provide transparent access to data processing and statistical analysis
-Enable reuse and adaptation of the pipeline for similar studies
-Facilitate peer verification and extension of the work
+* Ensure full reproducibility of the study
+* Provide transparent access to data processing and statistical analysis
+* Enable reuse and adaptation of the pipeline for similar studies
+* Facilitate peer verification and extension of the work
 
 📂 Repository Structure
 
