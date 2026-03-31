@@ -60,3 +60,26 @@ These files contain:
 * Model structure (likelihood + priors)
 * Parameter definitions
 * Generated quantities (if applicable)
+
+⚙️ R Interface
+
+Stan models are called from R using one of:
+
+* rstan
+* cmdstanr (recommended if used in your code)
+
+Example workflow:
+
+```R
+library(cmdstanr)
+
+model <- cmdstan_model("stan/model_name.stan")
+
+fit <- model$sample(
+  data = stan_data,
+  chains = 4,
+  iter_warmup = 1000,
+  iter_sampling = 2000,
+  seed = 123
+)
+```
