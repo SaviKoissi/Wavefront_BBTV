@@ -1,6 +1,7 @@
-**Reproducible Analysis Pipeline for Spatial dynamics and hidden spread of banana bunchy top disease in Benin**
+# Reproducible Analysis Pipeline for Spatial dynamics and hidden spread of banana bunchy top disease in Benin
+<u> <\u>
 
-📖 Associated Publication
+## 📖 Associated Publication
 
 This repository accompanies the following publication:
 
@@ -10,7 +11,7 @@ DOI: https://doi.org/10.3389/fagro.2026.1754220
 
 This repository contains all scripts and workflows required to reproduce the analyses, figures, and results presented in the manuscript.
 
-🎯 Objectives
+## 🎯 Objectives
 
 The purpose of this repository is to:
 
@@ -19,7 +20,7 @@ The purpose of this repository is to:
 * Enable reuse and adaptation of the pipeline for similar studies
 * Facilitate peer verification and extension of the work
 
-📂 Repository Structure
+## 📂 Repository Structure
 
 ```bash
 .
@@ -32,7 +33,7 @@ The purpose of this repository is to:
 └── environment.yml / renv.lock  # Dependency management (if applicable)
 ```
 
-⚙️ Workflow Overview
+## ⚙️ Workflow Overview
 
 The analysis is organized around a central R Markdown document:
 
@@ -46,7 +47,7 @@ BBTV_P.Rmd orchestrates the entire workflow:
 * Extracts posterior distributions
 * Generates figures and tables
 
-🧠 Bayesian Modeling (Stan Integration)
+## 🧠 Bayesian Modeling (Stan Integration)
  * 📌 Stan Files*
 
  All Bayesian models are defined in:
@@ -61,7 +62,7 @@ These files contain:
 * Parameter definitions
 * Generated quantities (if applicable)
 
-⚙️ R Interface
+## ⚙️ R Interface
 
 Stan models are called from R using one of:
 
@@ -84,16 +85,16 @@ fit <- model$sample(
 )
 ```
 
-🛠️ Installation
+## 🛠️ Installation
 
-1️⃣ Clone repository
+### 1️⃣ Clone repository
 
 ```bash
 git clone https://github.com/your-username/your-repo.git
 cd your-repo
 ```
 
-2️⃣ Install R dependencies
+### 2️⃣ Install R dependencies
 
 ```R
 install.packages(c(
@@ -105,7 +106,7 @@ install.packages(c(
 ))
 ```
 
-3️⃣ Install Stan
+### 3️⃣ Install Stan
 
 * Option A: CmdStan (recommended)
 
@@ -125,7 +126,7 @@ Option B: RStan
 Requires system C++ toolchain (more setup-heavy).
 ```
 
-▶️ Running the Analysis
+### ▶️ Running the Analysis
 
 Render the full pipeline:
 
@@ -133,7 +134,7 @@ Render the full pipeline:
 rmarkdown::render("BBTV_P.Rmd")
 ```
 
-🧾 Citation
+## 🧾 Citation
 
 ```bash
 Savi MK, Ahanhanzo C, Tiendrébéogo F, Eni AO and Pita JS (2026) Spatial dynamics and hidden spread of banana bunchy top disease in Benin. Front. Agron. 8:1754220. doi: 10.3389/fagro.2026.1754220
