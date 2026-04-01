@@ -1,5 +1,5 @@
 # Reproducible Analysis Pipeline for Spatial dynamics and hidden spread of banana bunchy top disease in Benin
-<u> <\u>
+<u> </u>
 
 ## 📖 Associated Publication
 
