@@ -39,7 +39,7 @@ The analysis is organized around a central R Markdown document:
 
 Main Pipeline
 
-BBTV_P.Rmd orchestrates the entire workflow:
+`BBTV_P.Rmd` orchestrates the entire workflow:
 
 * Loads and preprocesses data
 * Sources helper scripts
@@ -48,7 +48,8 @@ BBTV_P.Rmd orchestrates the entire workflow:
 * Generates figures and tables
 
 ## 🧠 Bayesian Modeling (Stan Integration)
- * 📌 Stan Files*
+
+### 📌 Stan Files
 
  All Bayesian models are defined in:
  
